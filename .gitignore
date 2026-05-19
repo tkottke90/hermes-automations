@@ -1,0 +1,26 @@
+# .gitignore for hermes-automations
+
+# Runtime state and generated output — gitignored by default
+**/data/
+**/logs/
+**/reports/
+
+# Python artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+*.egg-info/
+.venv/
+
+# Secrets / environment
+**/.env
+*.key
+*.pem
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
