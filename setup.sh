@@ -11,13 +11,6 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   echo "🔍 DRY RUN — no changes will be made"
 fi
 
-# ── Symlink definitions ───────────────────────────────────────────────────────
-declare -A LINKS=(
-  ["$HOME/.hermes/automations"]="$REPO_DIR/automations"
-  ["$HOME/.hermes/skills/custom"]="$REPO_DIR/skills"
-  ["$HOME/.hermes/lib"]="$REPO_DIR/lib"
-)
-
 # ── Helper ────────────────────────────────────────────────────────────────────
 create_link() {
   local target="$1"
@@ -50,13 +43,33 @@ create_link() {
   fi
 }
 
-# ── Run ───────────────────────────────────────────────────────────────────────
+# ── Directory symlinks ────────────────────────────────────────────────────────
 echo ""
 echo "🚀 Setting up hermes-automations symlinks..."
 echo ""
 
-for target in "${!LINKS[@]}"; do
-  create_link "$target" "${LINKS[$target]}"
+DIR_LINKS=(
+  "$HOME/.hermes/automations|$REPO_DIR/automations"
+  "$HOME/.hermes/skills/custom|$REPO_DIR/skills"
+)
+
+for entry in "${DIR_LINKS[@]}"; do
+  target="${entry%%|*}"
+  source="${entry##*|}"
+  create_link "$target" "$source"
+done
+
+# ── lib/ — symlink individual files (target dir already exists) ───────────────
+echo ""
+echo "📚 Symlinking lib files into ~/.hermes/lib/..."
+echo ""
+
+mkdir -p "$HOME/.hermes/lib"
+for src_file in "$REPO_DIR/lib"/*; do
+  [[ -f "$src_file" ]] || continue
+  filename="$(basename "$src_file")"
+  target="$HOME/.hermes/lib/$filename"
+  create_link "$target" "$src_file"
 done
 
 echo ""

@@ -3,19 +3,13 @@
 # Usage: ./teardown.sh [--dry-run]
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN=false
 
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=true
   echo "🔍 DRY RUN — no changes will be made"
 fi
-
-# ── Managed symlink targets ───────────────────────────────────────────────────
-MANAGED_LINKS=(
-  "$HOME/.hermes/automations"
-  "$HOME/.hermes/skills/custom"
-  "$HOME/.hermes/lib"
-)
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 remove_link() {
@@ -34,13 +28,29 @@ remove_link() {
   fi
 }
 
-# ── Run ───────────────────────────────────────────────────────────────────────
+# ── Directory symlinks ────────────────────────────────────────────────────────
 echo ""
 echo "🧹 Tearing down hermes-automations symlinks..."
 echo ""
 
+MANAGED_LINKS=(
+  "$HOME/.hermes/automations"
+  "$HOME/.hermes/skills/custom"
+)
+
 for target in "${MANAGED_LINKS[@]}"; do
   remove_link "$target"
+done
+
+# ── lib/ — remove individual file symlinks ────────────────────────────────────
+echo ""
+echo "📚 Removing lib file symlinks from ~/.hermes/lib/..."
+echo ""
+
+for src_file in "$REPO_DIR/lib"/*; do
+  [[ -f "$src_file" ]] || continue
+  filename="$(basename "$src_file")"
+  remove_link "$HOME/.hermes/lib/$filename"
 done
 
 echo ""
