@@ -22,6 +22,7 @@ import os
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
 _env_loaded = False
 
@@ -48,10 +49,10 @@ def send_notification(
     title: str,
     message: str,
     *,
-    url: str | None = None,
+    url: Optional[str] = None,
     url_title: str = "Open",
     sound: str = "pushover",
-    ttl: int | None = None,
+    ttl: Optional[int] = None,
     priority: int = 0,
     dry_run: bool = False,
 ) -> bool:
