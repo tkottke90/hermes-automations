@@ -25,7 +25,7 @@ HERMES_BIN = "hermes"  # hermes CLI must be on PATH
 def build_prompt(payload: dict) -> str:
     """Build the LLM prompt from the scan context payload."""
     import sys
-    sys.path.insert(0, str(BASE_DIR / "scripts"))
+    sys.path.insert(0, str(Path(__file__).parent))
     from price_fetcher import is_market_open
     now_utc = datetime.now(timezone.utc)
     market_status = "OPEN" if is_market_open() else "CLOSED (outside regular trading hours)"

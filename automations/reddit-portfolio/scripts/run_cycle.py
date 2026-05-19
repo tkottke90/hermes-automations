@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE_DIR = Path.home() / ".hermes" / "reddit-portfolio"
-SCRIPTS_DIR = BASE_DIR / "scripts"
+SCRIPTS_DIR = Path(__file__).parent
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 

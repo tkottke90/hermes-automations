@@ -96,7 +96,9 @@ _rl_remaining: float = 100.0   # updated from x-ratelimit-remaining headers
 _rl_reset_at: float = 0.0      # epoch time when the rate limit window resets
 
 
-def fetch_reddit_json(url: str, _retries: int = 3) -> dict | None:
+from typing import Optional
+
+def fetch_reddit_json(url: str, _retries: int = 3) -> Optional[dict]:
     """Fetch Reddit JSON, respecting rate-limit headers and retrying on 5xx.
 
     Reddit returns three rate-limit headers on every response:
@@ -340,7 +342,7 @@ def build_context_payload(portfolio: dict, posts: list[dict], prices: dict) -> d
     }
 
 
-def run(portfolio_id: str, force: bool = False) -> dict | None:
+def run(portfolio_id: str, force: bool = False) -> Optional[dict]:
     """
     Main entry point. Returns context payload or None if rate-limited.
     """

@@ -23,7 +23,8 @@ def ttl_until_10am_ct() -> int:
     return max(60, int((next_10am - now_ct).total_seconds()))
 
 BASE_DIR = Path.home() / ".hermes" / "reddit-portfolio"
-SCRIPTS_DIR = BASE_DIR / "scripts"
+SCRIPTS_DIR = Path(__file__).parent
+
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(Path.home() / ".hermes" / "lib"))
 from pushover import send_notification

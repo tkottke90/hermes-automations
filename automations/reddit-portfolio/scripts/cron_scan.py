@@ -13,7 +13,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCRIPTS_DIR = Path.home() / ".hermes" / "reddit-portfolio" / "scripts"
+SCRIPTS_DIR = Path(__file__).parent
 CONFIG_PATH = Path.home() / ".hermes" / "reddit-portfolio" / "config.json"
 
 def is_market_hours() -> bool:

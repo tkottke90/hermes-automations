@@ -15,7 +15,9 @@ _market_state_cache: dict = {"state": None, "fetched_at": None}
 MARKET_STATE_TTL = 300  # seconds (5 minutes)
 
 
-def get_price(ticker: str) -> dict | None:
+from typing import Optional
+
+def get_price(ticker: str) -> Optional[dict]:
     """
     Fetch current price info for a ticker.
     Returns dict with keys: ticker, price, open, prev_close, volume, market_cap, market_open, error
