@@ -32,8 +32,8 @@ metadata:
       - MINIO_ACCESS_KEY
       - MINIO_SECRET_KEY
       - MINIO_BUCKET
-      - PUSHOVER_TOKEN
-      - PUSHOVER_USER
+      - PUSHOVER_TOKEN  # sourced from ~/.hermes/.env if not in shell environment
+      - PUSHOVER_USER   # sourced from ~/.hermes/.env if not in shell environment
 ---
 
 # Reddit Portfolio

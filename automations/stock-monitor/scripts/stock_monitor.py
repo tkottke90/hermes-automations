@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 try:
     import yfinance as yf
@@ -32,8 +33,8 @@ TICKERS_DIR  = os.path.join(BASE_DIR, "tickers")
 SUMMARY_HOUR_UTC   = 22
 SUMMARY_MINUTE_UTC = 55
 
-PUSHOVER_TOKEN = "ab3jq9xrwcyw4a5oxuwyramd4g3thk"
-PUSHOVER_USER  = "uf5akhsw1o798jnjz2a4sjw6wjzto9"
+sys.path.insert(0, str(Path.home() / ".hermes" / "lib"))
+from pushover import send_notification as send_pushover
 
 DEFAULT_CONFIG = {
     "threshold_low":    None,   # None = disabled
@@ -44,17 +45,6 @@ DEFAULT_CONFIG = {
 # ----------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------
-
-def send_pushover(title, message, sound="cashregister"):
-    import urllib.request, urllib.parse
-    data = urllib.parse.urlencode({
-        "token": PUSHOVER_TOKEN,
-        "user":  PUSHOVER_USER,
-        "title": title,
-        "message": message,
-        "sound": sound,
-    }).encode()
-    urllib.request.urlopen("https://api.pushover.net/1/messages.json", data)
 
 def load_all_ticker_configs():
     if os.path.exists(TICKERS_FILE):
