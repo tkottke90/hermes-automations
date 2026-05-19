@@ -1,0 +1,17 @@
+{
+  "_comment": "Copy this file to data/config.json and adjust to your setup.",
+  "log_dir": "~/.hermes/cron/output",
+  "default_exp": 30,
+  "jobs": [
+    {
+      "cron_job_id": "job1",
+      "exp": 15,
+      "log_dir": "job1_logs",
+      "last_run": null
+    },
+    {
+      "cron_job_id": "job2",
+      "last_run": null
+    }
+  ]
+}
