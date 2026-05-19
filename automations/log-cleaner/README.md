@@ -45,6 +45,7 @@ Copy `config.example.json` to `data/config.json` and edit as needed.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `cron_job_id` | `string` | Yes | The Hermes cron job ID (short hex string visible in `hermes cron list`). |
+| `alias` | `string` | No | Human-friendly label shown in output alongside the `cron_job_id`. |
 | `exp` | `integer` | No | Expiration in **days** for this job's logs. Defaults to `default_exp` if omitted. |
 | `log_dir` | `string` | No | Subdirectory name under the base `log_dir`. Defaults to the value of `cron_job_id` if omitted. |
 | `last_run` | `string\|null` | Auto | ISO 8601 UTC timestamp of the last time the cleaner ran for this job. Written automatically — do not edit by hand. |

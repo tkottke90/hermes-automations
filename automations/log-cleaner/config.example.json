@@ -5,12 +5,14 @@
   "jobs": [
     {
       "cron_job_id": "job1",
+      "alias": "my-scanner",
       "exp": 15,
       "log_dir": "job1_logs",
       "last_run": null
     },
     {
       "cron_job_id": "job2",
+      "alias": "daily-report",
       "last_run": null
     }
   ]

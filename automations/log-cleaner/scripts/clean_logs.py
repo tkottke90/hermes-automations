@@ -198,9 +198,11 @@ def main() -> None:
             verbose=args.verbose,
         )
 
+        alias: Optional[str] = job.get("alias")
+        label = f"{alias} ({cron_job_id})" if alias else cron_job_id
         action_word = "Would delete" if args.dry_run else "Deleted"
         print(
-            f"[{cron_job_id}] {action_word} {stats['deleted']} / {stats['total']} files "
+            f"[{label}] {action_word} {stats['deleted']} / {stats['total']} files "
             f"older than {exp_days} day(s)"
             + (f" — {stats['errors']} error(s)" if stats["errors"] else "")
         )
