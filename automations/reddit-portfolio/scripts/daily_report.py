@@ -10,8 +10,6 @@ Usage:
 
 import json
 import sys
-import urllib.request
-import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,35 +25,8 @@ def ttl_until_10am_ct() -> int:
 BASE_DIR = Path.home() / ".hermes" / "reddit-portfolio"
 SCRIPTS_DIR = BASE_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
-
-# ── Pushover credentials ──────────────────────────────────────────────────────
-PUSHOVER_TOKEN = "ab3jq9xrwcyw4a5oxuwyramd4g3thk"
-PUSHOVER_USER  = "uf5akhsw1o798jnjz2a4sjw6wjzto9"
-
-
-def send_pushover(title: str, message: str, url: str = None, sound: str = "cashregister", ttl: int = None):
-    data = {
-        "token": PUSHOVER_TOKEN,
-        "user": PUSHOVER_USER,
-        "title": title,
-        "message": message,
-        "sound": sound,
-    }
-    if url:
-        data["url"] = url
-        data["url_title"] = "Open Report"
-    if ttl is not None:
-        data["ttl"] = ttl
-
-    encoded = urllib.parse.urlencode(data).encode()
-    req = urllib.request.Request(
-        "https://api.pushover.net/1/messages.json",
-        data=encoded,
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        result = json.loads(resp.read())
-        return result.get("status") == 1
+sys.path.insert(0, str(Path.home() / ".hermes" / "lib"))
+from pushover import send_notification
 
 
 def build_daily_message(portfolio_id: str) -> tuple[str, str]:
@@ -144,7 +115,7 @@ def run(portfolio_id: str = "pennystock"):
     # Build and send Pushover notification
     try:
         title, message = build_daily_message(portfolio_id)
-        ok = send_pushover(title, message, url=report_url, sound="cashregister", ttl=ttl_until_10am_ct())
+        ok = send_notification(title, message, url=report_url, sound="cashregister", ttl=ttl_until_10am_ct())
         if ok:
             print(f"[daily_report] ✅ Pushover notification sent.", flush=True)
         else:

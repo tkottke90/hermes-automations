@@ -56,8 +56,8 @@ A companion `stock_report.py` script generates and uploads an HTML dashboard to 
 
 | Variable | Required | Description |
 |---|---|---|
-| `PUSHOVER_TOKEN` | Yes | Pushover application token |
-| `PUSHOVER_USER` | Yes | Pushover user key |
+| `PUSHOVER_TOKEN` | Yes | Pushover application token — sourced from `~/.hermes/.env` if not in shell environment |
+| `PUSHOVER_USER` | Yes | Pushover user key — sourced from `~/.hermes/.env` if not in shell environment |
 | `MINIO_ENDPOINT` | For report only | MinIO server URL |
 | `MINIO_ACCESS_KEY` | For report only | MinIO access key |
 | `MINIO_SECRET_KEY` | For report only | MinIO secret key |
