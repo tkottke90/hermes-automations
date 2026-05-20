@@ -83,7 +83,7 @@ def build_daily_message(portfolio_id: str) -> tuple[str, str]:
     return title, message
 
 
-def run(portfolio_id: str = "pennystock"):
+def run(portfolio_id: str = "pennystock", notify: bool = False):
     print(f"[daily_report] Generating report for '{portfolio_id}'...", flush=True)
 
     import report_generator
@@ -103,31 +103,60 @@ def run(portfolio_id: str = "pennystock"):
     # Upload to MinIO S3
     report_url = None
     try:
-        from upload_report import upload_report
-        ok, report_url = upload_report(report_path)
-        if ok:
-            print(f"[daily_report] ✅ Report uploaded: {report_url}", flush=True)
-        else:
-            print(f"[daily_report] ⚠️  Upload returned non-success.", flush=True)
-            report_url = None
-    except Exception as e:
-        print(f"[daily_report] ⚠️  Upload failed: {e}", flush=True)
+        from upload_report import upload_report, upload_as_latest
+    except ImportError as e:
+        print(f"[daily_report] ⚠️  Could not import upload helpers: {e}", flush=True)
+        upload_report = None  # type: ignore[assignment]
+        upload_as_latest = None  # type: ignore[assignment]
 
-    # Build and send Pushover notification
-    try:
-        title, message = build_daily_message(portfolio_id)
-        ok = send_notification(title, message, url=report_url, sound="cashregister", ttl=ttl_until_10am_ct())
-        if ok:
-            print(f"[daily_report] ✅ Pushover notification sent.", flush=True)
-        else:
-            print(f"[daily_report] ⚠️  Pushover returned non-success.", flush=True)
-    except Exception as e:
-        print(f"[daily_report] ⚠️  Pushover failed: {e}", flush=True)
+    if upload_report is not None:
+        try:
+            ok, report_url = upload_report(report_path)
+            if ok:
+                print(f"[daily_report] ✅ Report uploaded: {report_url}", flush=True)
+            else:
+                print(f"[daily_report] ⚠️  Upload returned non-success.", flush=True)
+                report_url = None
+        except Exception as e:
+            print(f"[daily_report] ⚠️  Upload failed: {e}", flush=True)
+
+    # Upload stable latest file
+    if upload_as_latest is not None:
+        try:
+            ok_latest, latest_url = upload_as_latest(report_path, portfolio_id)
+            if ok_latest:
+                print(f"[daily_report] ✅ Latest report uploaded: {latest_url}", flush=True)
+            else:
+                print(f"[daily_report] ⚠️  Latest upload returned non-success.", flush=True)
+        except Exception as e:
+            print(f"[daily_report] ⚠️  Latest upload failed: {e}", flush=True)
+
+    # Build and send Pushover notification (only when --notify is passed)
+    if notify:
+        try:
+            title, message = build_daily_message(portfolio_id)
+            ok = send_notification(title, message, url=report_url, sound="cashregister", ttl=ttl_until_10am_ct())
+            if ok:
+                print(f"[daily_report] ✅ Pushover notification sent.", flush=True)
+            else:
+                print(f"[daily_report] ⚠️  Pushover returned non-success.", flush=True)
+        except Exception as e:
+            print(f"[daily_report] ⚠️  Pushover failed: {e}", flush=True)
+    else:
+        print(f"[daily_report] ℹ️  Pushover skipped (--notify not set).", flush=True)
 
     return report_path
 
 
 if __name__ == "__main__":
-    portfolio_id = sys.argv[1] if len(sys.argv) > 1 else "pennystock"
-    path = run(portfolio_id)
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate and upload daily portfolio report.")
+    parser.add_argument("portfolio_id", nargs="?", default="pennystock")
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="Send Pushover notification (omit for silent/frequent runs)",
+    )
+    args = parser.parse_args()
+    path = run(args.portfolio_id, notify=args.notify)
     print(str(path))

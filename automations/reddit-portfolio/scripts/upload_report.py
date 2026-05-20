@@ -7,10 +7,12 @@ Reads credentials from env vars MINIO_ACCESS_KEY and MINIO_SECRET_KEY
 
 Usage (standalone):
     python3.11 upload_report.py /path/to/report.html
+    python3.11 upload_report.py /path/to/report.html --latest pennystock
 
 As a module:
-    from upload_report import upload_report
+    from upload_report import upload_report, upload_as_latest
     ok, url = upload_report(Path("/path/to/report.html"))
+    ok, url = upload_as_latest(Path("/path/to/report.html"), "pennystock")
 """
 
 import hashlib
@@ -55,9 +57,11 @@ def _signing_key(secret_key: str, date_stamp: str) -> bytes:
     return k
 
 
-def upload_report(report_path: Path) -> tuple[bool, str]:
+def upload_report(report_path: Path, object_name: str | None = None) -> tuple[bool, str]:
     """
     Upload report_path to MinIO. Returns (success, public_url).
+    If object_name is provided, it is used as the MinIO object filename instead
+    of report_path.name — useful for uploading under a stable 'latest' key.
     Raises RuntimeError if credentials are missing.
     """
     _load_env_file()
@@ -71,7 +75,7 @@ def upload_report(report_path: Path) -> tuple[bool, str]:
         )
 
     payload = report_path.read_bytes()
-    filename = report_path.name
+    filename = object_name if object_name is not None else report_path.name
     object_key = f"{MINIO_BUCKET}/{filename}"
     host = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
 
@@ -139,17 +143,43 @@ def upload_report(report_path: Path) -> tuple[bool, str]:
     return success, public_url
 
 
+def upload_as_latest(report_path: Path, portfolio_id: str) -> tuple[bool, str]:
+    """
+    Upload report_path under the stable '<portfolio_id>.latest.html' key.
+    Overwrites any existing latest file on every call.
+    Returns (success, public_url).
+    """
+    latest_name = f"{portfolio_id}.latest.html"
+    return upload_report(report_path, object_name=latest_name)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: upload_report.py <report_path>")
-        sys.exit(1)
-    path = Path(sys.argv[1])
+    import argparse
+    parser = argparse.ArgumentParser(description="Upload an HTML report to MinIO S3.")
+    parser.add_argument("report_path", help="Path to the HTML report file")
+    parser.add_argument(
+        "--latest",
+        metavar="PORTFOLIO_ID",
+        help="Also upload under '<portfolio_id>.latest.html' stable key",
+    )
+    args = parser.parse_args()
+
+    path = Path(args.report_path)
     if not path.exists():
         print(f"File not found: {path}")
         sys.exit(1)
+
     ok, url = upload_report(path)
     if ok:
         print(f"✅ Uploaded: {url}")
     else:
         print(f"⚠️  Upload returned non-success for: {url}")
         sys.exit(1)
+
+    if args.latest:
+        ok_latest, latest_url = upload_as_latest(path, args.latest)
+        if ok_latest:
+            print(f"✅ Latest uploaded: {latest_url}")
+        else:
+            print(f"⚠️  Latest upload returned non-success for: {latest_url}")
+            sys.exit(1)
