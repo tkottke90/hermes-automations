@@ -87,16 +87,27 @@ def run_cycle(portfolio_id: str = "pennystock", force: bool = False,
         print(f"\n[run_cycle] 📄 Report: {report_path}", flush=True)
 
     # ── Step 5: Upload Latest (optional) ─────────────────────────
+    # Run in a background thread so it doesn't add to wall-clock time.
+    # MinIO is on LAN so upload completes well within the join timeout.
     if upload_latest and report_path:
-        try:
-            from upload_report import upload_as_latest
-            ok, latest_url = upload_as_latest(Path(report_path), portfolio_id)
-            if ok:
-                print(f"[run_cycle] ✅ Latest report uploaded: {latest_url}", flush=True)
-            else:
-                print(f"[run_cycle] ⚠️  Latest upload returned non-success.", flush=True)
-        except Exception as e:
-            print(f"[run_cycle] ⚠️  Latest upload failed: {e}", flush=True)
+        import threading
+
+        def _upload():
+            try:
+                from upload_report import upload_as_latest
+                ok, latest_url = upload_as_latest(Path(report_path), portfolio_id)
+                if ok:
+                    print(f"[run_cycle] ✅ Latest report uploaded: {latest_url}", flush=True)
+                else:
+                    print(f"[run_cycle] ⚠️  Latest upload returned non-success.", flush=True)
+            except Exception as e:
+                print(f"[run_cycle] ⚠️  Latest upload failed: {e}", flush=True)
+
+        upload_thread = threading.Thread(target=_upload, daemon=True)
+        upload_thread.start()
+        upload_thread.join(timeout=15)  # cap at 15s; LAN upload should be <1s
+        if upload_thread.is_alive():
+            print(f"[run_cycle] ⚠️  Latest upload timed out after 15s — skipping.", flush=True)
 
 
     print(f"\n[run_cycle] Cycle complete.", flush=True)
