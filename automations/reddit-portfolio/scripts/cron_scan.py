@@ -32,7 +32,7 @@ portfolios = [p["id"] for p in config.get("portfolios", []) if p.get("enabled", 
 
 for portfolio_id in portfolios:
     result = subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / "run_cycle.py"), portfolio_id],
+        [sys.executable, str(SCRIPTS_DIR / "run_cycle.py"), portfolio_id, "--upload-latest"],
         capture_output=True, text=True, timeout=300,
         cwd=str(SCRIPTS_DIR)
     )

@@ -25,10 +25,15 @@ SCRIPTS_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 
-def run_cycle(portfolio_id: str = "pennystock", force: bool = False, generate_report: bool = False):
+def run_cycle(portfolio_id: str = "pennystock", force: bool = False,
+              generate_report: bool = False, upload_latest: bool = False):
     print(f"\n{'='*60}", flush=True)
     print(f"[run_cycle] Starting cycle for '{portfolio_id}' at {datetime.now(timezone.utc).isoformat()}", flush=True)
     print(f"{'='*60}\n", flush=True)
+
+    if upload_latest:
+        generate_report = True
+
 
     # ── Step 1: Scan Reddit ──────────────────────────────────────
     import reddit_scanner
@@ -81,6 +86,19 @@ def run_cycle(portfolio_id: str = "pennystock", force: bool = False, generate_re
         report_path = report_generator.generate_report(portfolio_id, latest_decisions=decisions)
         print(f"\n[run_cycle] 📄 Report: {report_path}", flush=True)
 
+    # ── Step 5: Upload Latest (optional) ─────────────────────────
+    if upload_latest and report_path:
+        try:
+            from upload_report import upload_as_latest
+            ok, latest_url = upload_as_latest(Path(report_path), portfolio_id)
+            if ok:
+                print(f"[run_cycle] ✅ Latest report uploaded: {latest_url}", flush=True)
+            else:
+                print(f"[run_cycle] ⚠️  Latest upload returned non-success.", flush=True)
+        except Exception as e:
+            print(f"[run_cycle] ⚠️  Latest upload failed: {e}", flush=True)
+
+
     print(f"\n[run_cycle] Cycle complete.", flush=True)
     return {
         "decisions": decisions,
@@ -90,10 +108,22 @@ def run_cycle(portfolio_id: str = "pennystock", force: bool = False, generate_re
 
 
 if __name__ == "__main__":
-    portfolio_id = sys.argv[1] if len(sys.argv) > 1 else "pennystock"
-    force = "--force" in sys.argv
-    report = "--report" in sys.argv
+    import argparse
+    parser = argparse.ArgumentParser(description="Run one portfolio scan cycle.")
+    parser.add_argument("portfolio_id", nargs="?", default="pennystock")
+    parser.add_argument("--force", action="store_true",
+                        help="Skip rate-limit check and force a scan")
+    parser.add_argument("--report", action="store_true",
+                        help="Generate HTML report after trades")
+    parser.add_argument("--upload-latest", action="store_true",
+                        help="Generate report and upload as latest (implies --report)")
+    args = parser.parse_args()
 
-    result = run_cycle(portfolio_id, force=force, generate_report=report)
+    result = run_cycle(
+        args.portfolio_id,
+        force=args.force,
+        generate_report=args.report,
+        upload_latest=args.upload_latest,
+    )
     if result and result.get("report_path"):
         print(f"\n📄 Report saved: {result['report_path']}")
