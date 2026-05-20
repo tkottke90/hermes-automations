@@ -25,6 +25,8 @@ def is_market_hours() -> bool:
     return 13 * 60 + 30 <= hour_min <= 21 * 60
 
 if not is_market_hours():
+    now = datetime.now(timezone.utc)
+    print(f"[scanner] Market closed — skipping scan (UTC {now.strftime('%H:%M')} is outside 13:30–21:00 Mon–Fri)")
     sys.exit(0)
 
 config = json.loads(CONFIG_PATH.read_text())

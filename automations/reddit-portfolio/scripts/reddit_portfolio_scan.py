@@ -28,6 +28,8 @@ def is_market_hours() -> bool:
 
 
 if not is_market_hours():
+    now = datetime.now(timezone.utc)
+    print(f"[scanner] Market closed — skipping scan (UTC {now.strftime('%H:%M')} is outside 13:30–21:00 Mon–Fri)")
     sys.exit(0)
 
 config = json.loads(CONFIG_PATH.read_text())
@@ -71,3 +73,5 @@ for portfolio_id in portfolios:
             print(f"{label} {stderr}")
         if result.returncode != 0 and not stderr:
             print(f"[ERROR] Process exited with code {result.returncode} (no stderr output)")
+    else:
+        print(f"[{portfolio_id}] ℹ️  No output from scan cycle (no trades, no rate-limit info)")
