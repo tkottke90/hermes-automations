@@ -13,7 +13,7 @@ Usage:
 import json
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from pathlib import Path
 
 BASE_DIR = Path.home() / ".hermes" / "reddit-portfolio"
@@ -41,6 +41,16 @@ def save_transactions(portfolio_id: str, transactions: list):
     path = BASE_DIR / "portfolios" / portfolio_id / "transactions.json"
     with open(path, "w") as f:
         json.dump(transactions, f, indent=2)
+
+
+def count_trades_today(transactions: list) -> int:
+    """Count executed buy/sell trades that occurred today (UTC)."""
+    today = date.today().isoformat()  # YYYY-MM-DD
+    return sum(
+        1 for t in transactions
+        if t.get("type") in ("buy", "sell")
+        and t.get("timestamp", "").startswith(today)
+    )
 
 
 def execute_buy(portfolio: dict, transactions: list, decision: dict, price_data: dict) -> tuple[bool, str]:
@@ -170,6 +180,28 @@ def apply_decisions(portfolio_id: str, decisions: dict, prices: dict) -> list[st
     transactions = load_transactions(portfolio_id)
     messages = []
 
+    # Load max_trades config (None = unlimited)
+    config_path = BASE_DIR / "config.json"
+    with open(config_path) as f:
+        config = json.load(f)
+    portfolio_config = next(
+        (p for p in config["portfolios"] if p["id"] == portfolio_id), {}
+    )
+    max_trades = portfolio_config.get("max_trades")  # None = unlimited
+
+    # Count trades already executed today (from transaction log)
+    trades_today = count_trades_today(transactions)
+    if max_trades is not None:
+        remaining = max_trades - trades_today
+        print(
+            f"[trade_engine] max_trades={max_trades}, trades_today={trades_today}, remaining={remaining}",
+            file=sys.stderr
+        )
+        if remaining <= 0:
+            msg = f"[trade_engine] ⛔ Daily trade limit reached ({trades_today}/{max_trades}). No trades will be executed."
+            print(msg, file=sys.stderr)
+            return [msg]
+
     decision_list = decisions.get("decisions", [])
     if not decision_list:
         msg = "[trade_engine] No trades to execute."
@@ -196,6 +228,14 @@ def apply_decisions(portfolio_id: str, decisions: dict, prices: dict) -> list[st
             messages.append(f"[SKIP] Decision missing ticker: {decision}")
             continue
 
+        # Enforce max_trades cap (hold/skip count against executed trades only)
+        if action in ("buy", "sell") and max_trades is not None:
+            if trades_today >= max_trades:
+                msg = f"[SKIPPED] {action.upper()} {ticker} — daily trade limit reached ({trades_today}/{max_trades})"
+                print(msg, file=sys.stderr)
+                messages.append(msg)
+                continue
+
         price_data = prices.get(ticker, {})
         if not price_data or not price_data.get("price"):
             # Try to fetch on demand
@@ -210,6 +250,9 @@ def apply_decisions(portfolio_id: str, decisions: dict, prices: dict) -> list[st
         else:
             msg = f"[SKIP] Unknown action '{action}' for {ticker}"
             success = False
+
+        if success and action in ("buy", "sell"):
+            trades_today += 1  # keep in-memory counter in sync
 
         status = "✅" if success else "❌"
         full_msg = f"{status} {msg}"

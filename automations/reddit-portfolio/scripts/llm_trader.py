@@ -43,6 +43,15 @@ def build_prompt(payload: dict) -> str:
     )
     max_trade = payload.get("max_single_trade_usd", 300.0)
     max_pct = payload.get("max_position_pct", 0.15) * 100
+    max_trades = payload.get("max_trades")  # None = unlimited
+    trades_today = payload.get("trades_today", 0)
+
+    if max_trades is not None:
+        trades_remaining = max_trades - trades_today
+        trade_limit_line = f"Trade limit: {trades_today}/{max_trades} trades used today ({trades_remaining} remaining)"
+    else:
+        trades_remaining = None
+        trade_limit_line = "Trade limit: unlimited"
 
     prompt = f"""You are managing a paper trading portfolio for r/{payload["subreddit"]}.
 Your goal is to test whether Reddit penny stock discussions contain genuine trading signals.
@@ -52,6 +61,7 @@ This is simulated — no real money is at risk. Make realistic trading decisions
 Starting balance: ${starting:.2f}
 Cash available: ${cash:.2f}
 Max per trade: ${max_trade:.2f} (or {max_pct:.0f}% of portfolio, whichever is less)
+{trade_limit_line}
 
 Current holdings:
 {holdings_text}
@@ -77,6 +87,7 @@ GUIDELINES:
 6. If market is CLOSED: you may recommend actions but set "execute": false — they queue for next open
 7. Max position size: ${max_trade:.2f} per trade
 8. You may decide to do NOTHING if the posts don't present compelling setups — that is valid
+{f"9. IMPORTANT: You have {trades_remaining} trade(s) remaining today (limit: {max_trades}). Only recommend the highest-conviction trades — prioritize quality over quantity." if max_trades is not None else ""}
 
 Respond ONLY with valid JSON in exactly this format (no markdown, no commentary outside JSON):
 {{

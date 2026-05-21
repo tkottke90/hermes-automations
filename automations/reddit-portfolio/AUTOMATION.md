@@ -81,6 +81,38 @@ cron_daily_report.py  ← 2:05 AM UTC cron entry point
 | `data/portfolios/` | Per-portfolio state files (gitignored) |
 | `data/reports/` | Generated HTML reports (gitignored) |
 
+## Portfolio Configuration (`data/config.json`)
+
+Each portfolio object in the `portfolios` array supports these fields:
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `id` | string | Yes | — | Unique identifier for the portfolio |
+| `subreddit` | string | Yes | — | Subreddit to scan (without `r/`) |
+| `check_interval_minutes` | int | No | `15` | Minimum minutes between scans |
+| `starting_balance` | float | Yes | — | Initial cash balance in USD |
+| `max_position_pct` | float | No | `0.15` | Max portfolio % per single position |
+| `max_single_trade_usd` | float | No | `300.00` | Max USD per single trade |
+| `max_trades` | int\|null | No | `null` | Max buy/sell trades per calendar day (null = unlimited). Enforced by `trade_engine.py` and surfaced to the LLM so it prioritizes high-conviction trades when the limit is near. |
+| `enabled` | bool | No | `true` | Whether this portfolio is active |
+
+### Example with `max_trades`
+
+```json
+{
+  "id": "pennystock",
+  "subreddit": "Pennystock",
+  "check_interval_minutes": 15,
+  "starting_balance": 2000.00,
+  "max_position_pct": 0.15,
+  "max_single_trade_usd": 300.00,
+  "max_trades": 3,
+  "enabled": true
+}
+```
+
+With `max_trades: 3`, the engine will execute at most 3 buy/sell trades per day (hold decisions don't count). The LLM is also informed of remaining trades so it can self-select only the highest-conviction setups.
+
 ## Environment Variables
 
 | Variable | Required | Description |

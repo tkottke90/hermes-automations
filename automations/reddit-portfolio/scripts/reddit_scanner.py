@@ -268,8 +268,29 @@ def fetch_posts(subreddit: str, limit_hot: int = 25, limit_new: int = 10) -> lis
     return posts
 
 
-def build_context_payload(portfolio: dict, posts: list[dict], prices: dict) -> dict:
+def _count_trades_today(portfolio_id: str) -> int:
+    """Count buy/sell transactions executed today (UTC) from the transaction log."""
+    if not portfolio_id:
+        return 0
+    from datetime import date
+    path = BASE_DIR / "portfolios" / portfolio_id / "transactions.json"
+    try:
+        with open(path) as f:
+            txns = json.load(f)
+        today = date.today().isoformat()
+        return sum(
+            1 for t in txns
+            if t.get("type") in ("buy", "sell")
+            and t.get("timestamp", "").startswith(today)
+        )
+    except Exception:
+        return 0
+
+
+def build_context_payload(portfolio: dict, posts: list[dict], prices: dict, config: Optional[dict] = None) -> dict:
     """Build the full context payload for the LLM."""
+    if config is None:
+        config = {}
     # Gather all unique tickers mentioned
     all_tickers = set()
     for post in posts:
@@ -335,8 +356,10 @@ def build_context_payload(portfolio: dict, posts: list[dict], prices: dict) -> d
         "prices_summary": "\n".join(price_lines) if price_lines else "  (none)",
         "posts_text": "\n".join(post_lines),
         "all_tickers": sorted(all_tickers),
-        "max_position_pct": 0.15,
-        "max_single_trade_usd": 300.0,
+        "max_position_pct": config.get("max_position_pct", 0.15),
+        "max_single_trade_usd": config.get("max_single_trade_usd", 300.0),
+        "max_trades": config.get("max_trades"),
+        "trades_today": _count_trades_today(portfolio.get("id", "")),
         "posts": posts,
         "prices": prices,
     }
@@ -376,7 +399,7 @@ def run(portfolio_id: str, force: bool = False) -> Optional[dict]:
     all_tickers = list(set(t for p in posts for t in p["tickers"]) | set(portfolio.get("holdings", {}).keys()))
     prices = get_prices(all_tickers)
 
-    payload = build_context_payload(portfolio, posts, prices)
+    payload = build_context_payload(portfolio, posts, prices, config)
 
     # Update last_read_utc
     save_portfolio_last_read(portfolio_id, payload["scan_utc"])
