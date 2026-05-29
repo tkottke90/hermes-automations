@@ -1,18 +1,17 @@
 #!/Users/thomaskottke/.hermes/.venv/bin/python
 """
-processors/reddit.py — Extract Reddit post + top 3 comments via PRAW.
+processors/reddit.py — Extract Reddit post + top 3 comments via the public JSON API.
 
-Requires Reddit app credentials in ~/.hermes/.env:
-  REDDIT_APP_ID=your_client_id
-  REDDIT_APP_SECRET=your_client_secret
+No credentials required. Uses the public /<post_url>.json endpoint.
 
-Create a free "script" type app at: https://www.reddit.com/prefs/apps
-Redirect URL (required by form, never used): http://localhost:8080
+Share links (reddit.com/r/<sub>/s/<token>) are automatically resolved to canonical
+post URLs (reddit.com/r/<sub>/comments/<id>/<slug>) before fetching.
 """
 
-import os
+import json
 import re
 import sys
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -28,73 +27,79 @@ class ProcessResult:
     error: Optional[str] = None
 
 
-def _load_env() -> None:
-    """Load ~/.hermes/.env if REDDIT_APP_ID not already in environment."""
-    if os.environ.get("REDDIT_APP_ID"):
-        return
-    env_path = Path.home() / ".hermes" / ".env"
-    if not env_path.exists():
-        return
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if key not in os.environ:
-                os.environ[key] = val
+_HEADERS = {
+    "User-Agent": "obsidian-intake/1.0",
+    "Accept": "application/json",
+}
+
+_SHARE_LINK_RE = re.compile(r"reddit\.com/r/[^/]+/s/", re.IGNORECASE)
 
 
 def _resolve_share_link(url: str) -> str:
     """
-    Follow Reddit share links (/s/<token>) to the canonical post URL.
+    Detect Reddit share links (r/<sub>/s/<token>) and follow the redirect to
+    get the canonical post URL (r/<sub>/comments/<id>/<slug>).
     Returns the resolved URL, or the original on failure.
     """
-    if "/s/" not in url:
+    if not _SHARE_LINK_RE.search(url):
         return url
+
+    print(f"  [INFO] Detected share link, resolving: {url}", file=sys.stderr)
     try:
         import requests
-        resp = requests.get(
-            url,
-            headers={"User-Agent": "obsidian-intake/1.0"},
-            timeout=10,
-            allow_redirects=True,
-        )
+        resp = requests.get(url, headers=_HEADERS, timeout=10, allow_redirects=True)
+        # Strip query params / fragments — we only want the clean post URL
         resolved = str(resp.url).split("?")[0].split("#")[0].rstrip("/")
-        print(f"  [INFO] Resolved share link → {resolved}", file=sys.stderr)
+        print(f"  [INFO] Resolved → {resolved}", file=sys.stderr)
         return resolved
     except Exception as e:
-        print(f"  [WARN] Could not resolve share link {url}: {e}", file=sys.stderr)
+        print(f"  [WARN] Share link resolution failed: {e}", file=sys.stderr)
         return url
 
 
-def _extract_post_id(url: str) -> Optional[str]:
-    """Extract Reddit post ID from a canonical post URL."""
-    match = re.search(r"/comments/([a-z0-9]+)", url, re.IGNORECASE)
-    return match.group(1) if match else None
+def _to_json_url(url: str) -> str:
+    """Append .json to a canonical Reddit post URL."""
+    url = url.split("?")[0].split("#")[0].rstrip("/")
+    if not url.endswith(".json"):
+        url += ".json"
+    return url
 
 
-def _get_praw_instance():
-    """Create a read-only PRAW Reddit instance using app credentials."""
-    _load_env()
-    client_id = os.environ.get("REDDIT_APP_ID")
-    client_secret = os.environ.get("REDDIT_APP_SECRET")
+def _fetch(url: str) -> Optional[list]:
+    """Fetch and parse the Reddit post JSON."""
+    json_url = _to_json_url(url)
+    try:
+        req = urllib.request.Request(json_url, headers=_HEADERS)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        print(f"  [WARN] Reddit JSON fetch failed for {json_url}: {e}", file=sys.stderr)
+        return None
 
-    if not client_id or not client_secret:
-        raise RuntimeError(
-            "Reddit credentials missing. Add REDDIT_APP_ID and REDDIT_APP_SECRET "
-            "to ~/.hermes/.env — create a free 'script' app at "
-            "https://www.reddit.com/prefs/apps (redirect URL: http://localhost:8080)"
-        )
 
-    import praw
-    return praw.Reddit(
-        client_id=client_id,
-        client_secret=client_secret,
-        user_agent="obsidian-intake/1.0 (Hermes automation; read-only)",
-    )
+def _extract_post(data: list) -> Optional[dict]:
+    try:
+        return data[0]["data"]["children"][0]["data"]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _extract_top_comments(data: list, top_n: int = 3) -> List[dict]:
+    try:
+        children = data[1]["data"]["children"]
+        comments = [
+            {
+                "author": c["data"].get("author", "[deleted]"),
+                "score": c["data"].get("score", 0),
+                "body": c["data"].get("body", ""),
+            }
+            for c in children
+            if c.get("kind") == "t1" and c.get("data", {}).get("body")
+        ]
+        return sorted(comments, key=lambda c: c["score"], reverse=True)[:top_n]
+    except Exception as e:
+        print(f"  [WARN] Comment extraction failed: {e}", file=sys.stderr)
+        return []
 
 
 def process(note: dict, config: dict) -> ProcessResult:
@@ -103,50 +108,34 @@ def process(note: dict, config: dict) -> ProcessResult:
 
     url = note["frontmatter"].get(config["sourceKey"], "")
 
-    # Resolve share links before anything else
+    # Self-heal share links before anything else
     url = _resolve_share_link(url)
 
-    post_id = _extract_post_id(url)
-    if not post_id:
+    data = _fetch(url)
+    if not data:
         return ProcessResult(
             source_type="reddit",
-            error=f"Could not extract post ID from URL: {url}",
+            error=f"Could not fetch Reddit JSON for: {url}",
         )
 
-    try:
-        reddit = _get_praw_instance()
-        submission = reddit.submission(id=post_id)
-        # Trigger lazy load by accessing an attribute
-        title = submission.title
-        selftext = submission.selftext.strip()
-        author = str(submission.author) if submission.author else "[deleted]"
-        score = submission.score
-        subreddit = f"r/{submission.subreddit.display_name}"
-    except RuntimeError as e:
-        return ProcessResult(source_type="reddit", error=str(e))
-    except Exception as e:
-        return ProcessResult(source_type="reddit", error=f"PRAW fetch failed: {e}")
+    post = _extract_post(data)
+    if not post:
+        return ProcessResult(source_type="reddit", error="Could not parse Reddit JSON response")
 
-    # Post summary
+    title = post.get("title", "")
+    selftext = post.get("selftext", "").strip()
+    author = post.get("author", "[deleted]")
+    score = post.get("score", 0)
+    subreddit = f"r/{post.get('subreddit', '')}"
+
     post_summary = summarize(selftext if selftext else title, context_hint="Reddit post")
 
-    # Top 3 comments by score
+    comments = _extract_top_comments(data)
     comment_blocks: List[str] = []
-    try:
-        submission.comments.replace_more(limit=0)
-        top_comments = sorted(
-            [c for c in submission.comments.list() if hasattr(c, "body") and c.body],
-            key=lambda c: c.score,
-            reverse=True,
-        )[:3]
-        for i, c in enumerate(top_comments, 1):
-            c_author = str(c.author) if c.author else "[deleted]"
-            c_summary = summarize(c.body, context_hint="Reddit comment")
-            comment_blocks.append(f"{i}. **u/{c_author}** (↑{c.score}): {c_summary}")
-    except Exception as e:
-        print(f"  [WARN] Comment fetch failed: {e}", file=sys.stderr)
+    for i, c in enumerate(comments, 1):
+        c_summary = summarize(c["body"], context_hint="Reddit comment") if c["body"] else "[no content]"
+        comment_blocks.append(f"{i}. **u/{c['author']}** (↑{c['score']}): {c_summary}")
 
-    # Build note body
     parts = [f"# {title}\n"]
     parts.append(f"*Posted by u/{author} in {subreddit} · ↑{score}*\n")
     parts.append(f"**Summary:** {post_summary}\n")
