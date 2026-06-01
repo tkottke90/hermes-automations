@@ -9,6 +9,8 @@ Classification order per label:
   4. Apply `xkeywords` disqualification (checked last — overrides everything)
 
 A label is applied only if at least one positive signal fired AND no xkeyword matched.
+
+classify_email() returns Dict[str, str]: label_name → human-readable justification string.
 """
 
 import json
@@ -16,7 +18,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _extract_domain(sender: str) -> str:
@@ -36,11 +38,12 @@ def _check_interest_llm(
     interests: List[str],
     label_name: str,
     verbose: bool = False,
-) -> bool:
+) -> Tuple[bool, Optional[str]]:
     """
     Ask the Hermes LLM whether the email content is relevant to the given interests.
 
-    Uses the `hermes` CLI in headless mode. Returns False on any error (non-blocking).
+    Uses the `hermes` CLI in headless mode.
+    Returns (matched: bool, reason: str | None). reason is None on error/no-match.
     """
     interests_str = ", ".join(f'"{i}"' for i in interests)
 
@@ -49,7 +52,9 @@ def _check_interest_llm(
         f"if it is genuinely relevant to these interests: [{interests_str}].\n\n"
         f"Rules:\n"
         f"- Consider the user's specific intent (e.g. 'jeans' means men's jeans unless context says otherwise)\n"
-        f"- Return ONLY a JSON object: {{\"relevant\": true}} or {{\"relevant\": false}}\n"
+        f"- Return ONLY a JSON object with two fields:\n"
+        f"  {{\"relevant\": true, \"reason\": \"brief one-sentence explanation\"}}\n"
+        f"  or {{\"relevant\": false, \"reason\": \"brief one-sentence explanation\"}}\n"
         f"- Do not include any other text, explanation, or formatting\n\n"
         f"Email content:\n---\n{text[:3000]}\n---"
     )
@@ -62,7 +67,7 @@ def _check_interest_llm(
                     f"  [LLM] hermes CLI not found — skipping interest check for '{label_name}'",
                     file=sys.stderr,
                 )
-            return False
+            return False, None
 
         result = subprocess.run(
             [hermes_bin, "-p", prompt],
@@ -79,27 +84,29 @@ def _check_interest_llm(
         match = re.search(r'\{[^}]+\}', output)
         if match:
             data = json.loads(match.group(0))
-            return bool(data.get("relevant", False))
+            relevant = bool(data.get("relevant", False))
+            reason = data.get("reason") or None
+            return relevant, reason if relevant else None
 
         # Fallback: check for plain true/false keywords in output
         lower = output.lower()
         if '"relevant": true' in lower or "'relevant': true" in lower:
-            return True
+            return True, "LLM confirmed relevance (no structured reason returned)"
 
-        return False
+        return False, None
 
     except subprocess.TimeoutExpired:
         print(
             f"  [WARN] LLM interest check timed out for label '{label_name}'",
             file=sys.stderr,
         )
-        return False
+        return False, None
     except Exception as e:
         print(
             f"  [WARN] LLM interest check failed for label '{label_name}': {e}",
             file=sys.stderr,
         )
-        return False
+        return False, None
 
 
 def _find_hermes_bin() -> str:
@@ -123,7 +130,7 @@ def classify_email(
     sender: str,
     label_rules: Dict[str, Any],
     verbose: bool = False,
-) -> List[str]:
+) -> Dict[str, str]:
     """
     Classify an email and return the list of label names to apply.
 
@@ -134,10 +141,10 @@ def classify_email(
         verbose:      Print per-rule debug output.
 
     Returns:
-        List of label names that matched (may be empty).
+        Dict mapping label_name → justification string (may be empty dict).
     """
     domain = _extract_domain(sender)
-    matched_labels: List[str] = []
+    matched_labels: Dict[str, str] = {}
 
     for label_name, rule in label_rules.items():
         keywords: List[str] = rule.get("keywords", [])
@@ -146,18 +153,21 @@ def classify_email(
         interests: List[str] = rule.get("interest", [])
 
         positive_signal = False
+        justification: Optional[str] = None
 
         # 1. Domain match
         if domain and any(domain == d or domain.endswith("." + d) for d in domains):
             positive_signal = True
+            justification = f"domain match ({domain})"
             if verbose:
                 print(f"  [RULE] '{label_name}': domain match ({domain})")
 
         # 2. Keyword match
         if not positive_signal and _keywords_match(text, keywords):
             positive_signal = True
+            matched_kws = [kw for kw in keywords if kw.lower() in text.lower()]
+            justification = f"keyword match {matched_kws}"
             if verbose:
-                matched_kws = [kw for kw in keywords if kw.lower() in text.lower()]
                 print(f"  [RULE] '{label_name}': keyword match {matched_kws}")
 
         # 3. Interest / LLM check (only if other signals didn't already fire OR interest is standalone)
@@ -167,8 +177,10 @@ def classify_email(
                     f"  [RULE] '{label_name}': running LLM interest check "
                     f"for interests {interests}"
                 )
-            if _check_interest_llm(text, interests, label_name, verbose=verbose):
+            llm_match, llm_reason = _check_interest_llm(text, interests, label_name, verbose=verbose)
+            if llm_match:
                 positive_signal = True
+                justification = f"LLM interest match: {llm_reason or ', '.join(interests)}"
                 if verbose:
                     print(f"  [RULE] '{label_name}': LLM interest matched")
 
@@ -184,7 +196,7 @@ def classify_email(
                 )
             continue
 
-        matched_labels.append(label_name)
+        matched_labels[label_name] = justification or "unknown"
         if verbose:
             print(f"  [RULE] '{label_name}': ✓ MATCHED")
 

@@ -120,11 +120,13 @@ def process_email(
         return {"status": "error", "applied_labels": [], "message": f"Classification failed: {e}"}
 
     if not matched_labels:
-        _write_log_entry(log, email_id, subject, sender, md5, [], dry_run)
+        _write_log_entry(log, email_id, subject, sender, md5, [], {}, dry_run)
         return {"status": "no_match", "applied_labels": [], "message": "No labels matched"}
 
     # Step 5: Resolve label IDs
     resolved = gmail.resolve_label_ids(matched_labels)
+    # matched_labels is now Dict[name, justification]; split for downstream use
+    justifications: Dict[str, str] = {name: matched_labels[name] for name in matched_labels}
     valid_label_ids = [lid for lid in resolved.values() if lid is not None]
     valid_label_names = [name for name, lid in resolved.items() if lid is not None]
     missing_labels = [name for name, lid in resolved.items() if lid is None]
@@ -151,7 +153,7 @@ def process_email(
             return {"status": "error", "applied_labels": [], "message": f"Gmail API error: {e}"}
 
     # Step 7: Log
-    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, dry_run)
+    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, dry_run)
 
     status_msg = (
         f"{'[DRY-RUN] Would apply' if dry_run else 'Applied'} labels: {valid_label_names}"
@@ -173,6 +175,7 @@ def _write_log_entry(
     sender: str,
     md5: str,
     applied_labels: List[str],
+    justifications: Dict[str, str],
     dry_run: bool,
 ) -> None:
     log.write_entry(
@@ -181,6 +184,7 @@ def _write_log_entry(
             "email_title": subject,
             "sender": sender,
             "applied_labels": applied_labels,
+            "justification": justifications,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "md5": md5,
             "dry_run": dry_run,

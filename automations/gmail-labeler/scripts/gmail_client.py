@@ -147,7 +147,8 @@ class GmailClient:
         }
         return self._label_cache
 
-    def resolve_label_ids(self, label_names: List[str]) -> Dict[str, Optional[str]]:
+    def resolve_label_ids(self, label_names) -> Dict[str, Optional[str]]:
+        # Accepts List[str] or Dict[str, Any] — only the keys (label names) are used.
         """
         Resolve label names to IDs.
         Returns {name: id_or_None}. Logs a warning for each missing label.
