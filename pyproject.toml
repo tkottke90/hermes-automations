@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "hermes-automations"
+version = "1.0.0"
+description = "Hermes automation scripts — scheduled tasks and background jobs"
+requires-python = ">=3.11"
+
+dependencies = [
+  # ── Gmail Labeler ─────────────────────────────────────────────────────────
+  "google-api-python-client>=2.195.0",
+  "google-auth-httplib2>=0.3.1",
+  "google-auth-oauthlib>=1.4.0",
+  "weasyprint>=68.1",
+  "pdf2image>=1.17.0",
+  "pytesseract>=0.3.13",
+
+  # ── Stock Monitor / Reddit Portfolio ──────────────────────────────────────
+  "yfinance>=1.3.0",
+  "requests>=2.32.5",
+
+  # ── Obsidian Intake ───────────────────────────────────────────────────────
+  "python-frontmatter>=1.1.0",
+  "PyYAML>=6.0.1",
+
+  # ── Shared lib (pushover, report-publisher) ───────────────────────────────
+  "pillow>=10.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-mock>=3.12",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["automations*", "lib*"]
