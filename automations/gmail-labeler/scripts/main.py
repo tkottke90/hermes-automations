@@ -120,7 +120,7 @@ def process_email(
         return {"status": "error", "applied_labels": [], "message": f"Classification failed: {e}"}
 
     if not matched_labels:
-        _write_log_entry(log, email_id, subject, md5, [], dry_run)
+        _write_log_entry(log, email_id, subject, sender, md5, [], dry_run)
         return {"status": "no_match", "applied_labels": [], "message": "No labels matched"}
 
     # Step 5: Resolve label IDs
@@ -151,7 +151,7 @@ def process_email(
             return {"status": "error", "applied_labels": [], "message": f"Gmail API error: {e}"}
 
     # Step 7: Log
-    _write_log_entry(log, email_id, subject, md5, valid_label_names, dry_run)
+    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, dry_run)
 
     status_msg = (
         f"{'[DRY-RUN] Would apply' if dry_run else 'Applied'} labels: {valid_label_names}"
@@ -170,6 +170,7 @@ def _write_log_entry(
     log: LogStore,
     email_id: str,
     subject: str,
+    sender: str,
     md5: str,
     applied_labels: List[str],
     dry_run: bool,
@@ -178,6 +179,7 @@ def _write_log_entry(
         {
             "email_id": email_id,
             "email_title": subject,
+            "sender": sender,
             "applied_labels": applied_labels,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "md5": md5,
