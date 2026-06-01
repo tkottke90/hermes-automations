@@ -129,6 +129,50 @@ Options:
 
 ---
 
+## Utility Scripts
+
+### report_unlabeled_emails.py
+
+Analyzes the processed log and reports on emails that did not match any label rules. Useful for identifying gaps in your configuration and deciding what new rules to add.
+
+**Usage:**
+
+```bash
+# Show summary + first 20 unlabeled emails (default)
+python3 scripts/report_unlabeled_emails.py
+
+# Show all unlabeled emails
+python3 scripts/report_unlabeled_emails.py --all
+
+# Show first N unlabeled emails
+python3 scripts/report_unlabeled_emails.py --limit 50
+
+# Save report to file
+python3 scripts/report_unlabeled_emails.py --all --output unlabeled_report.txt
+
+# Use custom log path
+python3 scripts/report_unlabeled_emails.py --log /path/to/custom/log.json
+```
+
+**Output Format:**
+
+Lists unlabeled emails sorted by most recent first, showing:
+- Subject line
+- Sender email
+- Email ID
+- Timestamp
+
+**Workflow Tip:**
+
+Run this script after each config update to see how many emails are now being filtered:
+
+```bash
+python3 scripts/main.py --limit 100    # Reprocess batch of emails
+python3 scripts/report_unlabeled_emails.py --limit 30  # Review what's still missing
+```
+
+---
+
 ## Configuration
 
 `data/config.json` — full schema:

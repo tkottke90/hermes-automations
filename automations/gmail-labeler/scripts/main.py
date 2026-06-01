@@ -132,7 +132,13 @@ def process_email(
             print(f"  [NO_MATCH] Reasons: {no_match_reasons}")
             print(f"  [NO_MATCH] Recommendations: {recommendations}")
         _write_log_entry(log, email_id, subject, sender, md5, [], {}, False, dry_run,
-                         no_match_reasons=no_match_reasons, recommendations=recommendations)
+                         no_match_reasons=no_match_reasons, recommendations=recommendations, marked_read=True)
+        if not dry_run:
+            try:
+                gmail.mark_as_read(email_id)
+                print(f"  → Marked as read")
+            except Exception as e:
+                return {"status": "error", "applied_labels": [], "message": f"Mark as read failed: {e}"}
         return {"status": "no_match", "applied_labels": [], "message": "No labels matched"}
 
     # Step 5: Resolve label IDs
@@ -153,9 +159,19 @@ def process_email(
     if not valid_label_ids:
         print(
             f"  [SKIP] All matched labels missing in Gmail for '{subject}' — "
-            "email left unread for next run.",
+            f"email marked as read for next run.",
             file=sys.stderr,
         )
+        if not dry_run:
+            try:
+                gmail.mark_as_read(email_id)
+                print(f"  → Marked as read")
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "applied_labels": [],
+                    "message": f"Mark as read failed: {e}",
+                }
         return {
             "status": "skipped_missing_labels",
             "applied_labels": [],
@@ -175,7 +191,7 @@ def process_email(
 
     # Step 7: Log
     # Step 7: Log
-    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, should_trash, dry_run)
+    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, should_trash, dry_run, marked_read=True)
     status_msg = (
         f"{'[DRY-RUN] Would apply' if dry_run else 'Applied'} labels: {valid_label_names}"
         + (" + TRASH" if should_trash else "")
@@ -202,6 +218,7 @@ def _write_log_entry(
     dry_run: bool,
     no_match_reasons: Optional[Dict[str, str]] = None,
     recommendations: Optional[List[Dict[str, str]]] = None,
+    marked_read: bool = False,
 ) -> None:
     entry: Dict[str, Any] = {
         "email_id": email_id,
@@ -210,6 +227,7 @@ def _write_log_entry(
         "applied_labels": applied_labels,
         "justification": justifications,
         "trashed": trashed,
+        "marked_read": marked_read,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "md5": md5,
         "dry_run": dry_run,
