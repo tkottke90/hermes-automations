@@ -120,7 +120,7 @@ def process_email(
         return {"status": "error", "applied_labels": [], "message": f"Classification failed: {e}"}
 
     if not matched_labels:
-        _write_log_entry(log, email_id, subject, sender, md5, [], {}, dry_run)
+        _write_log_entry(log, email_id, subject, sender, md5, [], {}, False, dry_run)
         return {"status": "no_match", "applied_labels": [], "message": "No labels matched"}
 
     # Step 5: Resolve label IDs
@@ -130,6 +130,12 @@ def process_email(
     valid_label_ids = [lid for lid in resolved.values() if lid is not None]
     valid_label_names = [name for name, lid in resolved.items() if lid is not None]
     missing_labels = [name for name, lid in resolved.items() if lid is None]
+
+    # Determine if any matched rule requests trashing
+    should_trash = any(
+        label_rules.get(name, {}).get("trash", False)
+        for name in valid_label_names
+    )
 
     # If ALL matched labels are missing → leave unread, log nothing
     if not valid_label_ids:
@@ -148,15 +154,19 @@ def process_email(
     if not dry_run:
         try:
             gmail.apply_labels(email_id, valid_label_ids)
-            gmail.mark_as_read(email_id)
+            if should_trash:
+                gmail.trash_message(email_id)  # also removes INBOX/UNREAD implicitly
+            else:
+                gmail.mark_as_read(email_id)
         except Exception as e:
             return {"status": "error", "applied_labels": [], "message": f"Gmail API error: {e}"}
 
     # Step 7: Log
-    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, dry_run)
-
+    # Step 7: Log
+    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, should_trash, dry_run)
     status_msg = (
         f"{'[DRY-RUN] Would apply' if dry_run else 'Applied'} labels: {valid_label_names}"
+        + (" + TRASH" if should_trash else "")
     )
     if missing_labels:
         status_msg += f" (skipped missing: {missing_labels})"
@@ -176,6 +186,7 @@ def _write_log_entry(
     md5: str,
     applied_labels: List[str],
     justifications: Dict[str, str],
+    trashed: bool,
     dry_run: bool,
 ) -> None:
     log.write_entry(
@@ -185,6 +196,7 @@ def _write_log_entry(
             "sender": sender,
             "applied_labels": applied_labels,
             "justification": justifications,
+            "trashed": trashed,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "md5": md5,
             "dry_run": dry_run,

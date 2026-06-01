@@ -236,3 +236,7 @@ class GmailClient:
             id=email_id,
             body={"removeLabelIds": ["UNREAD", "INBOX"]},
         ).execute()
+
+    def trash_message(self, email_id: str) -> None:
+        """Move an email to Trash (auto-purged after 30 days). Reversible via untrash."""
+        self._service.users().messages().trash(userId="me", id=email_id).execute()
