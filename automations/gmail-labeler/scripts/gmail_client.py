@@ -230,9 +230,9 @@ class GmailClient:
         ).execute()
 
     def mark_as_read(self, email_id: str) -> None:
-        """Remove the UNREAD label from an email."""
+        """Remove the UNREAD and INBOX labels from an email."""
         self._service.users().messages().modify(
             userId="me",
             id=email_id,
-            body={"removeLabelIds": ["UNREAD"]},
+            body={"removeLabelIds": ["UNREAD", "INBOX"]},
         ).execute()
