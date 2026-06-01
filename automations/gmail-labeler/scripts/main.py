@@ -33,7 +33,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from gmail_client import GmailClient
 from ocr_pipeline import email_to_text, _check_system_deps
-from classifier import classify_email
+from classifier import classify_email, explain_no_match, recommend_labels
 from log_store import LogStore
 
 
@@ -120,7 +120,19 @@ def process_email(
         return {"status": "error", "applied_labels": [], "message": f"Classification failed: {e}"}
 
     if not matched_labels:
-        _write_log_entry(log, email_id, subject, sender, md5, [], {}, False, dry_run)
+        no_match_reasons = explain_no_match(text, sender, label_rules)
+        recommendations = recommend_labels(
+            text=text,
+            sender=sender,
+            subject=subject,
+            existing_label_names=list(label_rules.keys()),
+            verbose=verbose,
+        )
+        if verbose:
+            print(f"  [NO_MATCH] Reasons: {no_match_reasons}")
+            print(f"  [NO_MATCH] Recommendations: {recommendations}")
+        _write_log_entry(log, email_id, subject, sender, md5, [], {}, False, dry_run,
+                         no_match_reasons=no_match_reasons, recommendations=recommendations)
         return {"status": "no_match", "applied_labels": [], "message": "No labels matched"}
 
     # Step 5: Resolve label IDs
@@ -188,21 +200,25 @@ def _write_log_entry(
     justifications: Dict[str, str],
     trashed: bool,
     dry_run: bool,
+    no_match_reasons: Optional[Dict[str, str]] = None,
+    recommendations: Optional[List[Dict[str, str]]] = None,
 ) -> None:
-    log.write_entry(
-        {
-            "email_id": email_id,
-            "email_title": subject,
-            "sender": sender,
-            "applied_labels": applied_labels,
-            "justification": justifications,
-            "trashed": trashed,
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "md5": md5,
-            "dry_run": dry_run,
-        },
-        dry_run=dry_run,
-    )
+    entry: Dict[str, Any] = {
+        "email_id": email_id,
+        "email_title": subject,
+        "sender": sender,
+        "applied_labels": applied_labels,
+        "justification": justifications,
+        "trashed": trashed,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "md5": md5,
+        "dry_run": dry_run,
+    }
+    if no_match_reasons is not None:
+        entry["no_match_reasons"] = no_match_reasons
+    if recommendations is not None:
+        entry["label_recommendations"] = recommendations
+    log.write_entry(entry, dry_run=dry_run)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
