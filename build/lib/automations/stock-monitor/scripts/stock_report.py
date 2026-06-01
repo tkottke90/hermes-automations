@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 stock_report.py — Generate and upload a stock ticker monitor HTML report.
 

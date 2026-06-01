@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 report-publisher.py — Shared MinIO report upload utility (AWS SigV4).
 

@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 log_store.py — JSON processing log with deduplication and retention pruning.
 

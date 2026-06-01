@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 gmail_client.py — Gmail API wrapper for the labeler automation.
 

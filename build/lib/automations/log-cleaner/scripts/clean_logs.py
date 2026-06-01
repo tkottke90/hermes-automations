@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 log-cleaner: Purge expired Hermes cron job log (.md) files.
 

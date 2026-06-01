@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 Stock Price Monitor
 - Reads all tickers from ~/.hermes/finance/stocks/tickers.json

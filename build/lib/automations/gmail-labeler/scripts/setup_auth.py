@@ -1,4 +1,4 @@
-#!/Users/thomaskottke/.hermes-automations/.venv/bin/python3
+#!/usr/bin/env python3
 """
 setup_auth.py — First-run OAuth 2.0 setup for the Gmail Labeler automation.
 
