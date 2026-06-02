@@ -169,7 +169,7 @@ class GmailClient:
     def fetch_unread(self, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Fetch up to `limit` unread emails.
-        Returns list of dicts: {id, subject, sender, body_plain, body_html}.
+        Returns list of dicts: {id, subject, sender, body_plain, body_html, date}.
         """
         emails: List[Dict[str, Any]] = []
         page_token: Optional[str] = None
@@ -210,6 +210,7 @@ class GmailClient:
                         "sender": headers.get("from", ""),
                         "body_plain": body["plain"],
                         "body_html": body["html"],
+                        "date": headers.get("date", ""),
                     }
                 )
 

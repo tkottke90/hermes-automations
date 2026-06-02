@@ -63,8 +63,13 @@ def email_to_text(
     if body_html and body_html.strip():
         try:
             return _html_to_ocr_text(body_html, verbose=verbose)
+        except RuntimeError as e:
+            print(f"  [ERROR] OCR pipeline failed: {e}", file=sys.stderr)
+            if verbose:
+                import traceback
+                traceback.print_exc()
         except Exception as e:
-            print(f"  [WARN] OCR pipeline failed: {e}", file=sys.stderr)
+            print(f"  [ERROR] Unexpected OCR error: {e}", file=sys.stderr)
             if verbose:
                 import traceback
                 traceback.print_exc()
@@ -81,50 +86,55 @@ def email_to_text(
 def _html_to_ocr_text(html: str, verbose: bool = False) -> str:
     """
     Render HTML → PDF bytes → PIL images → OCR text strings → joined result.
+    Includes robust error handling and resource cleanup.
     """
     # Step 1: HTML → PDF bytes via weasyprint
+    from weasyprint import HTML  # type: ignore
+
     try:
-        from weasyprint import HTML  # type: ignore
-    except ImportError:
-        raise RuntimeError(
-            "weasyprint is not installed. Run: pip install weasyprint"
-        )
-
-    if verbose:
-        print("  [OCR] Rendering HTML → PDF...")
-
-    pdf_bytes = HTML(string=html).write_pdf()
+        if verbose:
+            print("  [OCR] Rendering HTML → PDF...")
+        pdf_bytes = HTML(string=html).write_pdf()
+    except Exception as e:
+        raise RuntimeError(f"Failed to render HTML to PDF: {e}")
 
     # Step 2: PDF bytes → PIL images via pdf2image
+    from pdf2image import convert_from_bytes  # type: ignore
+
+    images = []
     try:
-        from pdf2image import convert_from_bytes  # type: ignore
-    except ImportError:
-        raise RuntimeError(
-            "pdf2image is not installed. Run: pip install pdf2image"
-        )
-
-    if verbose:
-        print("  [OCR] Converting PDF pages → images...")
-
-    images = convert_from_bytes(pdf_bytes, dpi=150)
-
-    if verbose:
-        print(f"  [OCR] Running OCR on {len(images)} page(s)...")
+        if verbose:
+            print("  [OCR] Converting PDF pages → images...")
+        images = convert_from_bytes(pdf_bytes, dpi=150)
+    except Exception as e:
+        raise RuntimeError(f"Failed to convert PDF to images: {e}")
 
     # Step 3: images → text via pytesseract
     try:
         import pytesseract  # type: ignore
     except ImportError:
-        raise RuntimeError(
-            "pytesseract is not installed. Run: pip install pytesseract"
-        )
+        raise RuntimeError("pytesseract is not installed. Run: pip install pytesseract")
 
     page_texts = []
-    for i, img in enumerate(images):
-        text = pytesseract.image_to_string(img, lang="eng")
-        page_texts.append(text)
-        if verbose:
-            print(f"  [OCR] Page {i + 1}: {len(text)} chars extracted")
+    try:
+        for i, img in enumerate(images):
+            try:
+                text = pytesseract.image_to_string(img, lang="eng")
+                page_texts.append(text)
+                if verbose:
+                    print(f"  [OCR] Page {i + 1}: {len(text)} chars extracted")
+            finally:
+                # Explicitly close each PIL image to prevent memory leaks
+                img.close()
+        del images  # Explicitly delete the list of images
+    except Exception as e:
+        # Clean up any remaining images on error
+        for img in images:
+            try:
+                img.close()
+            except Exception:
+                pass
+        raise RuntimeError(f"OCR processing failed: {e}")
 
     combined = "\n\n".join(page_texts).strip()
     if verbose:

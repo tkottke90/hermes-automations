@@ -75,6 +75,7 @@ def process_email(
     label_rules: Dict[str, Any],
     dry_run: bool,
     verbose: bool,
+    seen_md5_dates: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Process a single email through the full pipeline.
@@ -87,13 +88,61 @@ def process_email(
     email_id = email["id"]
     subject = email.get("subject", "(no subject)")
     sender = email.get("sender", "")
+    date = email.get("date", "")
 
     # Step 1: Compute MD5
     md5 = compute_md5(email)
 
-    # Step 2: Deduplication check
+    # Step 2: Deduplication check with date tracking
     if log.has_entry(md5, dry_run=dry_run):
-        return {"status": "duplicate", "applied_labels": [], "message": "Already processed (duplicate MD5)"}
+        # Check if date differs from first occurrence
+        logged_entry = log.get_entry(md5, dry_run=dry_run)
+        if logged_entry:
+            logged_date = logged_entry.get("date", "")
+            if date and logged_date and date != logged_date:
+                # Different date → trash the older duplicate
+                if not dry_run:
+                    try:
+                        gmail.trash_message(email_id)
+                        print(f"  [DUPLICATE] Same content, different date — email TRASHED")
+                    except Exception as e:
+                        print(f"  [ERROR] Failed to trash email: {e}", file=sys.stderr)
+                        return {
+                            "status": "error",
+                            "applied_labels": [],
+                            "message": f"Trash failed: {e}",
+                        }
+                else:
+                    print(f"  [DRY-RUN] Would TRASH email (different date than first)")
+                return {
+                    "status": "duplicate",
+                    "applied_labels": [],
+                    "message": "Already processed (duplicate MD5, different date)",
+                }
+            else:
+                # Same date or no date in either → just mark as read
+                if not dry_run:
+                    try:
+                        gmail.mark_as_read(email_id)
+                        print(f"  [DUPLICATE] Same content, same date — marked as read")
+                    except Exception as e:
+                        print(f"  [ERROR] Failed to mark as read: {e}", file=sys.stderr)
+                        return {
+                            "status": "error",
+                            "applied_labels": [],
+                            "message": f"Mark as read failed: {e}",
+                        }
+                else:
+                    print(f"  [DRY-RUN] Would mark as read (duplicate MD5)")
+                return {
+                    "status": "duplicate",
+                    "applied_labels": [],
+                    "message": "Already processed (duplicate MD5)",
+                }
+
+    # Track first-seen date for future duplicate checks
+    if seen_md5_dates is not None:
+        seen_md5_dates[md5] = date
 
     # Step 3: OCR / text extraction
     try:
@@ -132,6 +181,7 @@ def process_email(
             print(f"  [NO_MATCH] Reasons: {no_match_reasons}")
             print(f"  [NO_MATCH] Recommendations: {recommendations}")
         _write_log_entry(log, email_id, subject, sender, md5, [], {}, False, dry_run,
+                         date=email.get("date", ""),
                          no_match_reasons=no_match_reasons, recommendations=recommendations, marked_read=True)
         if not dry_run:
             try:
@@ -191,7 +241,7 @@ def process_email(
 
     # Step 7: Log
     # Step 7: Log
-    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, should_trash, dry_run, marked_read=True)
+    _write_log_entry(log, email_id, subject, sender, md5, valid_label_names, justifications, should_trash, dry_run, date=email.get("date", ""), marked_read=True)
     status_msg = (
         f"{'[DRY-RUN] Would apply' if dry_run else 'Applied'} labels: {valid_label_names}"
         + (" + TRASH" if should_trash else "")
@@ -216,6 +266,7 @@ def _write_log_entry(
     justifications: Dict[str, str],
     trashed: bool,
     dry_run: bool,
+    date: str = "",
     no_match_reasons: Optional[Dict[str, str]] = None,
     recommendations: Optional[List[Dict[str, str]]] = None,
     marked_read: bool = False,
@@ -230,6 +281,7 @@ def _write_log_entry(
         "marked_read": marked_read,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "md5": md5,
+        "date": date,
         "dry_run": dry_run,
     }
     if no_match_reasons is not None:
@@ -292,12 +344,33 @@ def main() -> None:
     print()
 
     # Initialize components
-    gmail = GmailClient()
-    log = LogStore(LOG_PATH, retention_days=retention_days)
+    gmail = None
+    try:
+        gmail = GmailClient()
+    except Exception as e:
+        print(f"ERROR: Failed to initialize Gmail client: {e}", file=sys.stderr)
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+    log = None
+    try:
+        log = LogStore(LOG_PATH, retention_days=retention_days)
+    except Exception as e:
+        print(f"ERROR: Failed to initialize log store: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Fetch unread emails
     print(f"Fetching up to {processing_limit} unread emails...")
-    emails = gmail.fetch_unread(limit=processing_limit)
+    try:
+        emails = gmail.fetch_unread(limit=processing_limit)
+    except Exception as e:
+        print(f"ERROR: Failed to fetch emails: {e}", file=sys.stderr)
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
     print(f"Found {len(emails)} unread emails\n")
 
     if not emails:
@@ -312,32 +385,50 @@ def main() -> None:
         "skipped_missing_labels": 0,
         "error": 0,
     }
+    seen_md5_dates: Dict[str, str] = {}
 
     for i, email in enumerate(emails, 1):
         subject = email.get("subject", "(no subject)")
         sender = email.get("sender", "")
         print(f"[{i}/{len(emails)}] {subject!r} — {sender}")
 
-        result = process_email(
-            email=email,
-            gmail=gmail,
-            log=log,
-            label_rules=label_rules,
-            dry_run=dry_run,
-            verbose=args.verbose,
-        )
+        try:
+            result = process_email(
+                email=email,
+                gmail=gmail,
+                log=log,
+                label_rules=label_rules,
+                dry_run=dry_run,
+                verbose=args.verbose,
+                seen_md5_dates=seen_md5_dates,
+            )
 
-        status = result["status"]
-        counts[status] = counts.get(status, 0) + 1
-        print(f"  → {result['message']}")
-        print()
+            status = result["status"]
+            counts[status] = counts.get(status, 0) + 1
+            print(f"  → {result['message']}")
+            print()
+        except Exception as e:
+            counts["error"] += 1
+            print(f"  [ERROR] Failed to process email: {e}", file=sys.stderr)
+            if args.verbose:
+                import traceback
+                traceback.print_exc()
+            print()
 
     # Prune expired log entries
-    pruned = log.prune_expired()
-    if pruned:
-        print(f"Pruned {pruned} expired log entries (>{retention_days} days old)\n")
+    try:
+        pruned = log.prune_expired()
+        if pruned:
+            print(f"Pruned {pruned} expired log entries (>{retention_days} days old)\n")
+    except Exception as e:
+        print(f"  [WARN] Failed to prune log: {e}", file=sys.stderr)
 
     # Summary
+    try:
+        total_entries = log.entry_count() if log else 0
+    except Exception:
+        total_entries = 0
+
     print("─" * 50)
     print(f"{run_prefix}Run complete")
     print(f"  Labeled:               {counts['labeled']}")
@@ -345,7 +436,7 @@ def main() -> None:
     print(f"  Duplicates skipped:    {counts['duplicate']}")
     print(f"  Skipped (bad labels):  {counts['skipped_missing_labels']}")
     print(f"  Errors:                {counts['error']}")
-    print(f"  Log entries total:     {log.entry_count()}")
+    print(f"  Log entries total:     {total_entries}")
 
     if counts["error"] > 0:
         sys.exit(1)

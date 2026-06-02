@@ -36,6 +36,12 @@ class LogStore:
             self._cache = {}
         return self._cache  # type: ignore[return-value]
 
+    def get_entry(self, md5: str, dry_run: bool = False) -> Optional[Dict[str, Any]]:
+        """Return the log entry for this md5 if exists, otherwise None."""
+        data = self._load()
+        key = self._make_key(md5, dry_run)
+        return data.get(key)
+
     def _save(self, data: Dict[str, Any]) -> None:
         """Atomically write data to the log file."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
