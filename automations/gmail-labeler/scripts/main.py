@@ -349,7 +349,7 @@ def main() -> None:
         gmail = GmailClient()
     except Exception as e:
         print(f"ERROR: Failed to initialize Gmail client: {e}", file=sys.stderr)
-        if verbose:
+        if args.verbose:
             import traceback
             traceback.print_exc()
         sys.exit(1)

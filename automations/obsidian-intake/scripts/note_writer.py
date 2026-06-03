@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-import frontmatter
+import fm_utils as frontmatter
 import yaml
 
 

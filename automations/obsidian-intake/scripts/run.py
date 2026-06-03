@@ -118,7 +118,7 @@ def main() -> None:
         if not SINGLE_NOTE.exists():
             print(f"ERROR: --note file not found: {SINGLE_NOTE}", file=sys.stderr)
             sys.exit(1)
-        import frontmatter
+        import fm_utils as frontmatter
         post = frontmatter.load(str(SINGLE_NOTE))
         notes = [{
             "path": SINGLE_NOTE,

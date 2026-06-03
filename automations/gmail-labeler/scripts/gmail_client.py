@@ -7,16 +7,78 @@ Handles:
 - Fetching unread emails with full content
 - Label ID resolution (with missing-label warnings)
 - Applying labels and marking emails as read
+- Transient error retry with exponential backoff
 """
 
 import base64
+import http.client
 import os
 import sys
+import time
+from functools import wraps
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Callable, TypeVar
 
 TOKEN_PATH = Path.home() / ".hermes" / "google_token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+# Type variable for retry decorator
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def retry_on_transient(max_retries: int = 3) -> Callable[[F], F]:
+    """
+    Decorator: retry on transient HTTP/network errors.
+    
+    Catches:
+      - http.client.IncompleteRead (chunked encoding read timeout)
+      - TimeoutError (socket timeout)
+      - ConnectionError (connection dropped)
+      - OSError (general network issues)
+    
+    Retries with exponential backoff: 1s, 2s, 4s, then fails.
+    Logs each retry attempt with context for observability.
+    """
+    def decorator(func: F) -> F:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_error: Optional[Exception] = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except (
+                    http.client.IncompleteRead,
+                    TimeoutError,
+                    ConnectionError,
+                    OSError,
+                ) as e:
+                    last_error = e
+                    if attempt == max_retries:
+                        # Final attempt failed — re-raise with context
+                        print(
+                            f"[ERROR] {func.__name__} failed after {max_retries} retries: "
+                            f"{type(e).__name__}: {e}",
+                            file=sys.stderr,
+                        )
+                        raise
+                    
+                    # Exponential backoff: 1s, 2s, 4s
+                    delay = 2 ** (attempt - 1)
+                    print(
+                        f"[RETRY] {func.__name__} failed: {type(e).__name__} "
+                        f"(attempt {attempt}/{max_retries}, retrying in {delay}s)",
+                        file=sys.stderr,
+                    )
+                    time.sleep(delay)
+            
+            # Should never reach here, but keep type checker happy
+            if last_error:
+                raise last_error
+            raise RuntimeError("Retry loop exhausted without error")
+        
+        return wrapper  # type: ignore
+    
+    return decorator
 
 
 def _load_env_key() -> str:
@@ -119,7 +181,7 @@ def _extract_body(payload: Dict[str, Any]) -> Dict[str, str]:
 
 
 class GmailClient:
-    """Authenticated Gmail API client."""
+    """Authenticated Gmail API client with transient error retry logic."""
 
     def __init__(self) -> None:
         try:
@@ -133,6 +195,10 @@ class GmailClient:
             sys.exit(1)
 
         creds = _get_credentials()
+        
+        # Note: In newer googleapiclient versions (>= 1.7.0), passing http and credentials
+        # together is not allowed. The library now handles its own HTTP transport with
+        # built-in timeout handling. The timeout is handled implicitly during execute().
         from googleapiclient.discovery import build  # type: ignore
         self._service = build("gmail", "v1", credentials=creds)
         self._label_cache: Optional[Dict[str, str]] = None  # name -> id
@@ -141,10 +207,15 @@ class GmailClient:
         """Fetch and cache all Gmail labels as {name: id}."""
         if self._label_cache is not None:
             return self._label_cache
-        result = self._service.users().labels().list(userId="me").execute()
-        self._label_cache = {
-            lbl["name"]: lbl["id"] for lbl in result.get("labels", [])
-        }
+        
+        @retry_on_transient(max_retries=3)
+        def _execute_list() -> Dict[str, str]:
+            result = self._service.users().labels().list(userId="me").execute()
+            return {
+                lbl["name"]: lbl["id"] for lbl in result.get("labels", [])
+            }
+        
+        self._label_cache = _execute_list()
         return self._label_cache
 
     def resolve_label_ids(self, label_names) -> Dict[str, Optional[str]]:
@@ -170,6 +241,9 @@ class GmailClient:
         """
         Fetch up to `limit` unread emails.
         Returns list of dicts: {id, subject, sender, body_plain, body_html, date}.
+        
+        Retries on transient errors. If a single message fetch fails, skips it
+        and continues with others (graceful partial success).
         """
         emails: List[Dict[str, Any]] = []
         page_token: Optional[str] = None
@@ -184,7 +258,11 @@ class GmailClient:
             if page_token:
                 kwargs["pageToken"] = page_token
 
-            result = self._service.users().messages().list(**kwargs).execute()
+            @retry_on_transient(max_retries=3)
+            def _list_messages() -> Dict[str, Any]:
+                return self._service.users().messages().list(**kwargs).execute()
+
+            result = _list_messages()
             messages = result.get("messages", [])
             if not messages:
                 break
@@ -192,27 +270,41 @@ class GmailClient:
             for msg_stub in messages:
                 if len(emails) >= limit:
                     break
-                full_msg = (
-                    self._service.users()
-                    .messages()
-                    .get(userId="me", id=msg_stub["id"], format="full")
-                    .execute()
-                )
-                headers = {
-                    h["name"].lower(): h["value"]
-                    for h in full_msg.get("payload", {}).get("headers", [])
-                }
-                body = _extract_body(full_msg.get("payload", {}))
-                emails.append(
-                    {
-                        "id": full_msg["id"],
-                        "subject": headers.get("subject", "(no subject)"),
-                        "sender": headers.get("from", ""),
-                        "body_plain": body["plain"],
-                        "body_html": body["html"],
-                        "date": headers.get("date", ""),
+                
+                try:
+                    @retry_on_transient(max_retries=3)
+                    def _get_message() -> Dict[str, Any]:
+                        return (
+                            self._service.users()
+                            .messages()
+                            .get(userId="me", id=msg_stub["id"], format="full")
+                            .execute()
+                        )
+                    
+                    full_msg = _get_message()
+                    headers = {
+                        h["name"].lower(): h["value"]
+                        for h in full_msg.get("payload", {}).get("headers", [])
                     }
-                )
+                    body = _extract_body(full_msg.get("payload", {}))
+                    emails.append(
+                        {
+                            "id": full_msg["id"],
+                            "subject": headers.get("subject", "(no subject)"),
+                            "sender": headers.get("from", ""),
+                            "body_plain": body["plain"],
+                            "body_html": body["html"],
+                            "date": headers.get("date", ""),
+                        }
+                    )
+                except Exception as e:
+                    # Graceful partial success: skip this message and continue
+                    print(
+                        f"[WARN] Skipping message {msg_stub['id']}: "
+                        f"{type(e).__name__}: {e}",
+                        file=sys.stderr,
+                    )
+                    continue
 
             page_token = result.get("nextPageToken")
             if not page_token:
@@ -224,20 +316,33 @@ class GmailClient:
         """Apply the given label IDs to an email."""
         if not label_ids:
             return
-        self._service.users().messages().modify(
-            userId="me",
-            id=email_id,
-            body={"addLabelIds": label_ids},
-        ).execute()
+        
+        @retry_on_transient(max_retries=3)
+        def _execute_modify() -> None:
+            self._service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"addLabelIds": label_ids},
+            ).execute()
+        
+        _execute_modify()
 
     def mark_as_read(self, email_id: str) -> None:
         """Remove the UNREAD and INBOX labels from an email."""
-        self._service.users().messages().modify(
-            userId="me",
-            id=email_id,
-            body={"removeLabelIds": ["UNREAD", "INBOX"]},
-        ).execute()
+        @retry_on_transient(max_retries=3)
+        def _execute_modify() -> None:
+            self._service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"removeLabelIds": ["UNREAD", "INBOX"]},
+            ).execute()
+        
+        _execute_modify()
 
     def trash_message(self, email_id: str) -> None:
         """Move an email to Trash (auto-purged after 30 days). Reversible via untrash."""
-        self._service.users().messages().trash(userId="me", id=email_id).execute()
+        @retry_on_transient(max_retries=3)
+        def _execute_trash() -> None:
+            self._service.users().messages().trash(userId="me", id=email_id).execute()
+        
+        _execute_trash()

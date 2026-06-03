@@ -6,7 +6,7 @@ scanner.py — Find pending intake notes in the Obsidian vault.
 from pathlib import Path
 from typing import List, Dict, Any
 
-import frontmatter
+import fm_utils as frontmatter
 
 
 def find_pending_notes(

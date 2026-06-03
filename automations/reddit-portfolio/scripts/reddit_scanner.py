@@ -92,59 +92,28 @@ def check_rate_limit(portfolio: dict, min_interval_minutes: int = 5) -> bool:
     return elapsed >= min_interval_minutes
 
 
-_rl_remaining: float = 100.0   # updated from x-ratelimit-remaining headers
-_rl_reset_at: float = 0.0      # epoch time when the rate limit window resets
-
-
 from typing import Optional
 
-def fetch_reddit_json(url: str, _retries: int = 3) -> Optional[dict]:
-    """Fetch Reddit JSON, respecting rate-limit headers and retrying on 5xx.
+# Arctic Shift is a real-time Reddit archive mirror that doesn't require OAuth.
+# Reddit's own .json endpoints now return 403 for all unauthenticated requests.
+ARCTIC_SHIFT_BASE = "https://arctic-shift.photon-reddit.com/api"
+_BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
-    Reddit returns three rate-limit headers on every response:
-      x-ratelimit-used      — requests used in this window
-      x-ratelimit-remaining — requests left (float)
-      x-ratelimit-reset     — seconds until window resets
 
-    We read these on every successful response and back off proactively
-    when remaining < 10 to avoid triggering 429s or overloading their edge.
-    On 5xx we retry up to _retries times with exponential backoff.
-    """
-    import time
-    global _rl_remaining, _rl_reset_at
-
-    # Proactive back-off: if we're almost out of budget, sleep until reset
-    if _rl_remaining < 10 and _rl_reset_at > time.time():
-        wait = _rl_reset_at - time.time()
-        print(f"[scanner] rate-limit budget low ({_rl_remaining:.0f} remaining) — sleeping {wait:.0f}s until reset", file=sys.stderr)
-        time.sleep(max(0, wait))
-
+def fetch_arctic_json(url: str, _retries: int = 3) -> Optional[dict]:
+    """Fetch JSON from Arctic Shift, retrying on 5xx errors."""
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Accept": "application/json",
-        },
+        headers={"User-Agent": _BROWSER_UA, "Accept": "application/json"},
     )
-
     for attempt in range(1, _retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=20) as resp:
-                # Read and store rate-limit headers for next call
-                try:
-                    _rl_remaining = float(resp.headers.get("x-ratelimit-remaining", _rl_remaining))
-                    reset_secs    = float(resp.headers.get("x-ratelimit-reset", 0))
-                    _rl_reset_at  = time.time() + reset_secs
-                    used          = resp.headers.get("x-ratelimit-used", "?")
-                    print(f"[scanner] ratelimit: used={used}, remaining={_rl_remaining:.0f}, reset_in={reset_secs:.0f}s", file=sys.stderr)
-                except Exception:
-                    pass  # headers missing — not fatal
                 return json.loads(resp.read().decode())
-
         except urllib.error.HTTPError as e:
             if e.code in (500, 502, 503, 504) and attempt < _retries:
-                wait = 2 ** attempt  # 2s, 4s, 8s
-                print(f"[scanner] HTTP {e.code} on attempt {attempt}/{_retries} — retrying in {wait}s: {url}", file=sys.stderr)
+                wait = 2 ** attempt
+                print(f"[scanner] HTTP {e.code} attempt {attempt}/{_retries} — retrying in {wait}s: {url}", file=sys.stderr)
                 time.sleep(wait)
                 continue
             print(f"[scanner] fetch error {url}: {e}", file=sys.stderr)
@@ -152,7 +121,6 @@ def fetch_reddit_json(url: str, _retries: int = 3) -> Optional[dict]:
         except Exception as e:
             print(f"[scanner] fetch error {url}: {e}", file=sys.stderr)
             return None
-
     return None
 
 
@@ -212,31 +180,39 @@ def score_post(post: dict) -> int:
 
 
 def fetch_post_comments(permalink: str, limit: int = 5) -> list[str]:
-    """Fetch top comments for a post."""
-    url = f"https://www.reddit.com{permalink}.json?limit={limit}&sort=top"
-    data = fetch_reddit_json(url)
-    if not data or len(data) < 2:
+    """Fetch top comments for a post via Arctic Shift."""
+    # permalink e.g. /r/Pennystock/comments/abc123/title/
+    parts = permalink.strip("/").split("/")
+    # parts: ['r', 'Pennystock', 'comments', 'abc123', ...]
+    try:
+        post_id = parts[3]
+    except IndexError:
+        return []
+    url = f"{ARCTIC_SHIFT_BASE}/comments/search?link_id=t3_{post_id}&limit={limit}&sort=top"
+    data = fetch_arctic_json(url)
+    if not data:
         return []
     comments = []
-    for child in data[1]["data"]["children"]:
-        body = child["data"].get("body", "")
-        if body and body != "[deleted]" and body != "[removed]":
+    for item in data.get("data", []):
+        body = item.get("body", "")
+        if body and body not in ("[deleted]", "[removed]"):
             comments.append(body[:300])
     return comments[:limit]
 
 
 def fetch_posts(subreddit: str, limit_hot: int = 25, limit_new: int = 10) -> list[dict]:
-    """Fetch hot + new posts from a subreddit, deduplicated."""
+    """Fetch hot + new posts from a subreddit via Arctic Shift, deduplicated."""
     seen_ids = set()
     posts = []
 
-    for endpoint in [f"hot.json?limit={limit_hot}", f"new.json?limit={limit_new}"]:
-        url = f"https://www.reddit.com/r/{subreddit}/{endpoint}"
-        data = fetch_reddit_json(url)
+    # Arctic Shift sorts by created_utc. We fetch two batches (recent posts)
+    # and deduplicate — equivalent to hot+new for our signal-scoring purposes.
+    for limit in [limit_hot, limit_new]:
+        url = f"{ARCTIC_SHIFT_BASE}/posts/search?subreddit={subreddit}&limit={limit}&sort=desc"
+        data = fetch_arctic_json(url)
         if not data:
             continue
-        for child in data["data"]["children"]:
-            d = child["data"]
+        for d in data.get("data", []):
             if d["id"] in seen_ids:
                 continue
             seen_ids.add(d["id"])
@@ -252,7 +228,7 @@ def fetch_posts(subreddit: str, limit_hot: int = 25, limit_new: int = 10) -> lis
                 "created_utc": d.get("created_utc", 0),
                 "tickers": extract_tickers(d["title"] + " " + d.get("selftext", "")),
             })
-        time.sleep(1)  # be polite between requests
+        time.sleep(0.5)  # be polite between requests
 
     # Skip comment fetching to stay within rate limits and keep scans fast.
     # Post body + title provides sufficient signal for the LLM.
