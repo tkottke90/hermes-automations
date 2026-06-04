@@ -8,7 +8,7 @@ the monolithic SKILL.md into focused per-operation documents.
 
 ## Problem: The Original Skill
 
-The original `~/.hermes/skills/research/llm-wiki/SKILL.md` is **845 lines / ~43KB**. At ~3 chars/token
+The original `~/.hermes/skills/research/llm-wiki/SKILL.md` ([link](https://github.com/NousResearch/hermes-agent/blob/main/skills/research/llm-wiki/SKILL.md)) is **845 lines / ~43KB**. At ~3 chars/token
 for dense markdown, that loads **~14–18k tokens** into every wiki-adjacent context window — regardless
 of whether the session is initializing a wiki, ingesting a source, running a query, or linting.
 
